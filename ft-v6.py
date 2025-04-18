@@ -167,11 +167,9 @@ class FinanceTracker(tk.Tk):
                 f'{d["total_uzs"]:,}'.replace(",", " "),
                 d["category"], d.get("comment", "")
             ))
-        text = f"Итого: {total:,} сум".replace(",", " ")
+        text = f"ИТОГО (всего): {total:,} сум".replace(",", " ")
         for cat, val in per_cat.items():
-            text = f"Итого: {total:,} сум\n".replace(",", " ")
-        for cat, val in per_cat.items():
-            text += f"{cat}: {val:,}\n".replace(",", " ")
+            text += f"\n{cat}: {val:,}".replace(",", " ")
         self.total_label.config(text=text)
 
     def add_record(self):
@@ -243,7 +241,6 @@ class FinanceTracker(tk.Tk):
             # --- График по месяцам ---
             fig1, ax1 = plt.subplots(figsize=(5, 3))
             monthly_total["total_uzs"].plot(kind="bar", ax=ax1)
-            ax1.set_xticklabels([d.strftime("%Y-%m") for d in monthly_total.index], rotation=45)
             ax1.set_title("Доходы по месяцам")
             ax1.set_ylabel("Сумма (UZS)")
             ax1.set_xlabel("Месяц")
@@ -280,38 +277,19 @@ class FinanceTracker(tk.Tk):
         idx = int(item_id[0])
         record = self.filtered_data[idx]
 
-        message = (
-            f"📅 Дата: {record.get('date')}\n"
-            f"🇺🇿 Сумма в UZS: {record.get('uzs')}\n"
-            f"💵 Сумма в USD: {record.get('usd')}\n"
-            f"💱 Курс: {record.get('rate')}\n"
-            f"📊 Итог в сум: {record.get('total_uzs')}\n"
-            f"📌 Категория: {record.get('category')}\n"
-            f"🗒 Комментарий: {record.get('comment', '')}"
-        )
+        field_names = {
+            "date": "Дата",
+            "usd": "USD",
+            "uzs": "UZS",
+            "rate": "Курс",
+            "total_uzs": "Итог в UZS",
+            "category": "Категория",
+            "comment": "Комментарий"
+        }
 
-        messagebox.showinfo("Информация о записи", message)
+        lines = [f"{field_names.get(k, k)}: {v}" for k, v in record.items()]
+        messagebox.showinfo("Детали записи", "\n".join(lines))
 
-
-    def update_table(self):
-        self.tree.delete(*self.tree.get_children())
-        total = 0
-        per_cat = {}
-
-        for i, d in enumerate(self.filtered_data):
-            total += d["total_uzs"]
-            per_cat[d["category"]] = per_cat.get(d["category"], 0) + d["total_uzs"]
-            self.tree.insert("", "end", iid=i, values=(
-                d["date"], d["uzs"], d["usd"], d["rate"],
-                f'{d["total_uzs"]:,}'.replace(",", " "),
-                d["category"], d.get("comment", "")
-            ))
-
-        # Формируем итоговый текст
-        text = f"Общий итог: {total:,} сум\n".replace(",", " ")
-        for cat, val in per_cat.items():
-            text += f"{cat}: {val:,} сум\n".replace(",", " ")
-        self.total_label.config(text=text)
 class RecordDialog(tk.Toplevel):
     def __init__(self, parent, categories, data=None):
         super().__init__(parent)
@@ -346,13 +324,6 @@ class RecordDialog(tk.Toplevel):
                 self.date_entry.pack(fill="x", **padding)
             else:
                 ttk.Entry(self, textvariable=var).pack(fill="x", **padding)
-
-        ttk.Label(self, text="Категория:").pack(**padding)
-        self.cat_box = ttk.Combobox(self, textvariable=self.category_var, values=self.categories)
-        self.cat_box.pack(fill="x", **padding)
-
-        ttk.Button(self, text="Сохранить", command=self.on_save).pack(pady=10)
-        ttk.Button(self, text="Отмена", command=self.destroy).pack()
 
     def on_save(self):
         try:
