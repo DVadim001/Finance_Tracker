@@ -55,9 +55,12 @@ class FinanceTracker(tk.Tk):
             return PRESET_CATEGORIES.copy()
 
     def save_all(self):
+        if not self.data:
+            self.data = []
+        if not self.categories:
+            self.categories = PRESET_CATEGORIES.copy()
         with open(DATA_FILE, "w", encoding="utf-8") as f:
             json.dump({"transactions": self.data, "categories": self.categories}, f, ensure_ascii=False, indent=4)
-
     def create_widgets(self):
         filter_frame = ttk.LabelFrame(self, text="Фильтры")
         filter_frame.pack(fill="x", padx=10, pady=5)
@@ -298,6 +301,9 @@ class RecordDialog(tk.Toplevel):
         self.result = None
         self.categories = categories
 
+        self.bind("<Return>", lambda e: self.on_save())
+        self.bind("<Escape>", lambda e: self.destroy())
+
         self.date_var = tk.StringVar(value=data["date"] if data else datetime.today().strftime("%Y-%m-%d"))
         self.uzs_var = tk.StringVar(value=str(data["uzs"]) if data else "")
         self.usd_var = tk.StringVar(value=str(data["usd"]) if data else "")
@@ -309,6 +315,17 @@ class RecordDialog(tk.Toplevel):
 
     def init_ui(self):
         padding = {"padx": 10, "pady": 4}
+
+        canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        frame = ttk.Frame(canvas)
+        vsb = ttk.Scrollbar(self, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vsb.set)
+
+        vsb.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        canvas.create_window((0, 0), window=frame, anchor="nw")
+        frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
         for label, var in [
             ("Дата", self.date_var),
             ("Сумма в UZS", self.uzs_var),
@@ -317,13 +334,24 @@ class RecordDialog(tk.Toplevel):
             ("Категория", self.category_var),
             ("Комментарий", self.comment_var)
         ]:
-            ttk.Label(self, text=label).pack(**padding)
+            ttk.Label(frame, text=label).pack(**padding)
 
             if label == "Дата":
-                self.date_entry = DateEntry(self, textvariable=var, date_pattern="yyyy-mm-dd")
+                self.date_entry = DateEntry(frame, textvariable=var, date_pattern="yyyy-mm-dd")
                 self.date_entry.pack(fill="x", **padding)
+            elif label == "Категория":
+                self.cat_box = ttk.Combobox(frame, textvariable=var, values=self.categories)
+                self.cat_box.pack(fill="x", **padding)
             else:
-                ttk.Entry(self, textvariable=var).pack(fill="x", **padding)
+                ttk.Entry(frame, textvariable=var).pack(fill="x", **padding)
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(pady=10)
+
+        ttk.Button(btn_frame, text="Сохранить", command=self.on_save).pack(side="left", padx=10)
+        ttk.Button(btn_frame, text="Отмена", command=self.destroy).pack(side="left", padx=10)
+
+
 
     def on_save(self):
         try:
