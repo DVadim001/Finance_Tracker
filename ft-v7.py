@@ -118,6 +118,12 @@ class FinanceTracker(tk.Tk):
         self.toggle_rate_btn = ttk.Button(btn_frame, text="Скрыть курс", command=self.toggle_rate_column)
         self.toggle_rate_btn.pack(side="left", padx=5)
 
+        self.tree.bind("<Control-c>", self.copy_selected)
+        self.tree.bind("<Button-3>", self.show_context_menu)
+
+        self.menu = tk.Menu(self, tearoff=0)
+        self.menu.add_command(label="Копировать", command=self.copy_selected)
+
     def toggle_rate_column(self):
         show = not self.rate_visible
         self.tree.column("Курс", width=100 if show else 0, minwidth=0, stretch=show)
@@ -228,30 +234,37 @@ class FinanceTracker(tk.Tk):
 
     def plot_data(self):
         if not self.filtered_data:
+            messagebox.showinfo("Нет данных", "Нет данных для отображения графика.")
             return
+
         df = pd.DataFrame(self.filtered_data)
-        df["date"] = pd.to_datetime(df["date"])
-        df.set_index("date", inplace=True)
 
         try:
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            df = df.dropna(subset=["date"])
+            df.set_index("date", inplace=True)
+
+            if "total_uzs" not in df.columns:
+                messagebox.showerror("Ошибка", "Нет данных 'total_uzs' для построения графика.")
+                return
+
             monthly_total = df.resample("M").sum(numeric_only=True)
+            monthly_total.index = monthly_total.index.strftime('%Y-%m')  # Только год-месяц
             by_category = df.groupby("category").sum(numeric_only=True)
 
             win = tk.Toplevel(self)
             win.title("Графики")
             win.geometry("1000x500")
 
-            # --- График по месяцам ---
             fig1, ax1 = plt.subplots(figsize=(5, 3))
             monthly_total["total_uzs"].plot(kind="bar", ax=ax1)
-            ax1.set_title("Доходы по месяцам")
+            ax1.set_title("Суммарно по месяцам")
             ax1.set_ylabel("Сумма (UZS)")
             ax1.set_xlabel("Месяц")
             ax1.tick_params(axis="x", rotation=45)
             ax1.ticklabel_format(style='plain', axis='y')
             fig1.tight_layout()
 
-            # --- График по категориям ---
             fig2, ax2 = plt.subplots(figsize=(5, 3))
             by_category["total_uzs"].plot(kind="bar", ax=ax2, color="gray")
             ax2.set_title("По категориям")
@@ -261,7 +274,6 @@ class FinanceTracker(tk.Tk):
             ax2.ticklabel_format(style='plain', axis='y')
             fig2.tight_layout()
 
-            # --- Отображение в окне ---
             canvas1 = FigureCanvasTkAgg(fig1, master=win)
             canvas1.draw()
             canvas1.get_tk_widget().pack(side="left", fill="both", expand=True)
@@ -271,7 +283,7 @@ class FinanceTracker(tk.Tk):
             canvas2.get_tk_widget().pack(side="right", fill="both", expand=True)
 
         except Exception as e:
-            messagebox.showerror("Ошибка", f"Ошибка при построении графика: {e}")
+            messagebox.showerror("Ошибка", f"Ошибка при построении графика:\n{e}")
 
     def show_details(self, event):
         item_id = self.tree.selection()
@@ -293,11 +305,25 @@ class FinanceTracker(tk.Tk):
         lines = [f"{field_names.get(k, k)}: {v}" for k, v in record.items()]
         messagebox.showinfo("Детали записи", "\n".join(lines))
 
+    def copy_selected(self, event=None):
+        selected = self.tree.selection()
+        if selected:
+            row = self.tree.item(selected[0])["values"]
+            text = "\t".join(str(val) for val in row)
+            self.clipboard_clear()
+            self.clipboard_append(text)
+
+    def show_context_menu(self, event):
+        region = self.tree.identify("region", event.x, event.y)
+        if region == "cell":
+            self.menu.post(event.x_root, event.y_root)
+
 class RecordDialog(tk.Toplevel):
     def __init__(self, parent, categories, data=None):
         super().__init__(parent)
         self.title("Добавить / Редактировать запись")
-        self.geometry("400x420")
+        self.geometry("400x450")
+        self.resizable(False, False)
         self.result = None
         self.categories = categories
 
@@ -326,32 +352,50 @@ class RecordDialog(tk.Toplevel):
         canvas.create_window((0, 0), window=frame, anchor="nw")
         frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
 
-        for label, var in [
-            ("Дата", self.date_var),
-            ("Сумма в UZS", self.uzs_var),
-            ("Сумма в USD", self.usd_var),
-            ("Курс USD", self.rate_var),
-            ("Категория", self.category_var),
-            ("Комментарий", self.comment_var)
-        ]:
-            ttk.Label(frame, text=label).pack(**padding)
+        # Контекстное меню для копирования
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label="Копировать", command=lambda: self.focus_get().event_generate("<<Copy>>"))
 
-            if label == "Дата":
-                self.date_entry = DateEntry(frame, textvariable=var, date_pattern="yyyy-mm-dd")
-                self.date_entry.pack(fill="x", **padding)
-            elif label == "Категория":
-                self.cat_box = ttk.Combobox(frame, textvariable=var, values=self.categories)
-                self.cat_box.pack(fill="x", **padding)
-            else:
-                ttk.Entry(frame, textvariable=var).pack(fill="x", **padding)
+        def create_entry(var):
+            entry = ttk.Entry(frame, textvariable=var)
+            entry.pack(fill="x", **padding)
+            entry.bind("<Button-3>", lambda e: menu.tk_popup(e.x_root, e.y_root))
+            return entry
 
-        btn_frame = ttk.Frame(frame)
-        btn_frame.pack(pady=10)
+        ttk.Label(frame, text="Дата (ГГГГ-ММ-ДД):").pack(**padding)
+        self.date_entry = DateEntry(frame, textvariable=self.date_var, date_pattern="yyyy-mm-dd")
+        self.date_entry.pack(fill="x", **padding)
 
-        ttk.Button(btn_frame, text="Сохранить", command=self.on_save).pack(side="left", padx=10)
-        ttk.Button(btn_frame, text="Отмена", command=self.destroy).pack(side="left", padx=10)
+        ttk.Label(frame, text="Сумма в UZS:").pack(**padding)
+        create_entry(self.uzs_var)
 
+        ttk.Label(frame, text="Сумма в USD:").pack(**padding)
+        usd_entry = create_entry(self.usd_var)
+        usd_entry.bind("<FocusOut>", self.auto_select_usd_category)
 
+        ttk.Label(frame, text="Курс USD:").pack(**padding)
+        create_entry(self.rate_var)
+
+        ttk.Label(frame, text="Категория:").pack(**padding)
+        self.cat_box = ttk.Combobox(frame, textvariable=self.category_var, values=self.categories)
+        self.cat_box.pack(fill="x", **padding)
+
+        ttk.Label(frame, text="Комментарий:").pack(**padding)
+        comment_entry = create_entry(self.comment_var)
+
+        ttk.Button(frame, text="Сохранить", command=self.on_save).pack(pady=10)
+        ttk.Button(frame, text="Отмена", command=self.destroy).pack()
+
+    def auto_select_usd_category(self, event=None):
+        try:
+            usd = float(self.usd_var.get().strip())
+            if usd > 0 and not self.category_var.get():
+                for c in self.categories:
+                    if "USD" in c or "Шаяны" in c:
+                        self.category_var.set(c)
+                        break
+        except:
+            pass
 
     def on_save(self):
         try:
@@ -362,11 +406,7 @@ class RecordDialog(tk.Toplevel):
                 messagebox.showwarning("Ошибка", "Введите курс для USD")
                 return
             total = int(usd * rate + uzs)
-            if usd > 0 and not self.category_var.get():
-                for c in self.categories:
-                    if "USD" in c:
-                        self.category_var.set(c)
-                        break
+
             self.result = {
                 "date": self.date_var.get(),
                 "usd": usd,
@@ -379,6 +419,7 @@ class RecordDialog(tk.Toplevel):
             self.destroy()
         except Exception as e:
             messagebox.showerror("Ошибка", f"Ошибка ввода: {e}")
+
 
 if __name__ == "__main__":
     app = FinanceTracker()
